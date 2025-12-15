@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>VR-Style Viscosity Lab</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="styles.css">
+  <style>body {
+  margin: 0;
+  overflow: hidden;
+  font-family: Arial, sans-serif;
+  background: #202030; /* fallback if WebGL fails */
+}
+
+#hud {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  padding: 12px;
+  border-radius: 6px;
+  font-size: 14px;
+  max-width: 520px;
+  overflow-y: auto;
+  max-height: 320px;
+}
+
+#controls {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 12px;
+  border-radius: 6px;
+  max-width: 560px;
+}
+
+#controls .row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0;
+}
+
+#controls label {
+  min-width: 180px;
+  font-weight: bold;
+}
+
+#controls select,
+#controls input {
+  flex: 1;
+  padding: 6px;
+}
+
+#controls .buttons {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+button {
+  cursor: pointer;
+  padding: 8px 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #f7f7f7;
+}
+
+button:hover {
+  opacity: 0.9;
+}
+
+/* Utility buttons */
+.reset-btn {
+  background: #d9534f;
+  color: #fff;
+  border: none;
+}
+
+.clear-btn {
+  background: #f0ad4e;
+  color: #fff;
+  border: none;
+}
+
+.export-btn {
+  background: #5cb85c;
+  color: #fff;
+  border: none;
+}
+
+/* Table in HUD */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+}
+
+th, td {
+  border: 1px solid #ccc;
+  padding: 6px;
+  text-align: center;
+}
+
+th {
+  background: #444;
+  color: #fff;
+}
+
+/* Chart overlay */
+#chartCanvas {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 6px;
+  padding: 10px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+}
+
+/* Responsive adjustments */
+@media (max-width: 900px) {
+  #controls {
+    max-width: 90vw;
+  }
+  #hud {
+    max-width: 90vw;
+  }
+  #chartCanvas {
+    width: 360px;
+    height: 200px;
+  }
+}</style>
+</head>
+<body>
+  <div id="hud">Results will appear here...</div>
+
+  <div id="controls">
+    <div class="row">
+      <label for="liquid">Liquid:</label>
+      <select id="liquid">
+        <option value="water">Water</option>
+        <option value="glycerol">Glycerol</option>
+        <option value="honey">Honey</option>
+        <option value="oil">Motor Oil</option>
+        <option value="ethanol">Ethanol</option>
+        <option value="milk">Milk</option>
+        <option value="blood">Blood</option>
+        <option value="oliveoil">Olive Oil</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <label for="radius">Sphere radius (mm):</label>
+      <input type="number" id="radius" value="5" min="1" step="0.5">
+    </div>
+
+    <div class="row">
+      <label for="density">Sphere density (kg/m³):</label>
+      <input type="number" id="density" value="7800" min="500" step="100">
+    </div>
+
+    <div class="row">
+      <label for="temperature">Temperature (°C):</label>
+      <input type="number" id="temperature" value="25" min="0" step="1">
+    </div>
+
+    <div class="row buttons">
+      <button id="simulateBtn">Simulate Selected Liquid</button>
+      <button id="compareBtn">Compare Results</button>
+      <button id="resetBtn" class="reset-btn">Reset</button>
+      <button id="clearBtn" class="clear-btn">Clear Log</button>
+      <button id="exportBtn" class="export-btn">Export Log</button>
+    </div>
+  </div>
+
+  <canvas id="chartCanvas" width="420" height="220"></canvas>
+
+  <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
+  <script src="app.js"></script><script>const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x202030);
+
+const camera = new THREE.PerspectiveCamera(
+  60,
+  window.innerWidth / window.innerHeight,
+  0.1,
+  100
+);
+camera.position.set(0, 2, 6);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// --- Lighting ---
+const pointLight = new THREE.PointLight(0xffffff, 1);
+pointLight.position.set(5, 5, 5);
+scene.add(pointLight);
+scene.add(new THREE.AmbientLight(0x606060));
+
+// --- Floor plane ---
+const floorGeometry = new THREE.PlaneGeometry(20, 20);
+const floorMaterial = new THREE.MeshPhongMaterial({
+  color: 0x333333,
+  side: THREE.DoubleSide
+});
+const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+floor.rotation.x = -Math.PI / 2;
+floor.position.y = -2.1;
+scene.add(floor);
+
+// --- Tube (light blue) ---
+const tubeGeometry = new THREE.CylinderGeometry(0.5, 0.5, 4, 32, 1, true);
+const tubeMaterial = new THREE.MeshPhongMaterial({
+  color: 0xADD8E6, // light blue
+  transparent: true,
+  opacity: 0.4,
+  side: THREE.DoubleSide
+});
+const tube = new THREE.Mesh(tubeGeometry, tubeMaterial);
+scene.add(tube);
+
+// --- Sphere ---
+const sphereGeometry = new THREE.SphereGeometry(0.1, 32, 32);
+const sphereMaterial = new THREE.MeshPhongMaterial({ color: 0xff5722 });
+const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+sphere.position.y = 2;
+scene.add(sphere);
+
+// --- Liquids data (viscosity in mPa·s at 25°C) ---
+const liquids = {
+  water: { density: 997, viscosity: 0.89 },
+  glycerol: { density: 1260, viscosity: 1410 },
+  honey: { density: 1420, viscosity: 10000 },
+  oil: { density: 880, viscosity: 250 },
+  ethanol: { density: 789, viscosity: 1.2 },
+  milk: { density: 1030, viscosity: 2.0 },
+  blood: { density: 1060, viscosity: 3.5 },
+  oliveoil: { density: 910, viscosity: 84 }
+};
+
+// --- State ---
+let vt = 0;
+let running = false;
+const resultsLog = []; // { liquid, viscosity, vt, Re, temp }
+const hud = document.getElementById("hud");
+const chartCanvas = document.getElementById("chartCanvas");
+const ctx = chartCanvas.getContext("2d");
+
+// --- Helpers ---
+function stokesTerminalVelocity(rho_s, rho_l, g, r, mu) {
+  // v_t = (2/9)*((rho_s-rho_l)*g*r^2)/mu
+  return (2 / 9) * ((rho_s - rho_l) * g * r * r) / mu;
+}
+
+function reynoldsNumber(rho_l, v, d, mu) {
+  // Re = (rho_l * v * characteristic_length) / mu; here d = 2r
+  return (rho_l * v * d) / mu;
+}
+
+function formatRun(run) {
+  return `
+    <b>Simulation result for ${run.liquid}:</b><br>
+    Temperature: ${run.temp} °C<br>
+    Density: ${run.density} kg/m³<br>
+    Viscosity: ${run.viscosity.toFixed(2)} mPa·s<br>
+    Terminal velocity (Stokes law): ${run.vt.toFixed(3)} m/s<br>
+    Reynolds number: ${run.Re.toFixed(2)} ${run.Re < 1 ? "(laminar ✓)" : "(warning)"}<br><br>
+    <b>Equation used:</b><br>
+    v<sub>t</sub> = (2/9) · ((ρ<sub>s</sub> − ρ<sub>l</sub>) · g · r²) / μ
+  `;
+}
+
+// --- Simulation ---
+function simulateLiquid() {
+  sphere.position.y = 2;
+  running = true;
+
+  const liquidName = document.getElementById("liquid").value;
+  const liquid = liquids[liquidName];
+
+  const r_mm = parseFloat(document.getElementById("radius").value);
+  const r = r_mm / 1000; // meters
+  const rho_s = parseFloat(document.getElementById("density").value);
+  const temp = parseFloat(document.getElementById("temperature").value);
+
+  const rho_l = liquid.density;
+  const g = 9.81;
+  const muRef = liquid.viscosity / 1000; // Pa·s
+
+  // Simple temperature dependence: viscosity decreases ~2% per °C above 25
+  const mu = muRef * Math.pow(0.98, temp - 25);
+
+  vt = stokesTerminalVelocity(rho_s, rho_l, g, r, mu);
+  const Re = reynoldsNumber(rho_l, vt, 2 * r, mu);
+
+  const run = {
+    liquid: liquidName,
+    temp,
+    density: rho_l,
+    viscosity: mu * 1000, // back to mPa·s
+    vt,
+    Re
+  };
+
+  resultsLog.push(run);
+  hud.innerHTML = formatRun(run);
+
+  drawChart(); // update chart with current log
+}
+
+// --- Comparison table ---
+function showComparison() {
+  if (resultsLog.length === 0) {
+    hud.textContent = "No simulations yet. Run some first!";
+    return;
+  }
+  let tableHTML =
+    "<b>Comparison of simulated liquids:</b>" +
+    "<table><tr><th>Liquid</th><th>Temp (°C)</th><th>Viscosity (mPa·s)</th><th>Terminal v (m/s)</th><th>Re</th></tr>";
+
+  resultsLog.forEach((run) => {
+    tableHTML += `<tr>
+      <td>${run.liquid}</td>
+      <td>${run.temp}</td>
+      <td>${run.viscosity.toFixed(2)}</td>
+      <td>${run.vt.toFixed(3)}</td>
+      <td>${run.Re.toFixed(2)} ${run.Re < 1 ? "✓" : "⚠"}</td>
+    </tr>`;
+  });
+  tableHTML += "</table>";
+  hud.innerHTML = tableHTML;
+
+  drawChart();
+}
+
+// --- Reset & Log management ---
+function resetSimulation() {
+  running = false;
+  sphere.position.y = 2;
+  hud.textContent = "Simulation reset. Ready for new run.";
+}
+
+function clearLog() {
+  resultsLog.length = 0;
+  hud.textContent = "Log cleared. Run new simulations to compare.";
+  drawChart(true);
+}
+
+function exportLog() {
+  if (resultsLog.length === 0) {
+    hud.textContent = "Nothing to export. Run some simulations first.";
+    return;
+  }
+  const headers = ["liquid", "temp_C", "density_kgm3", "viscosity_mPas", "terminal_v_ms", "Re"];
+  const rows = resultsLog.map((r) =>
+    [r.liquid, r.temp, r.density, r.viscosity.toFixed(3), r.vt.toFixed(4), r.Re.toFixed(4)].join(",")
+  );
+  const csv = [headers.join(","), ...rows].join("\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "viscosity_lab_log.csv";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  hud.textContent = "Log exported as viscosity_lab_log.csv";
+}
+
+// --- Chart drawing (simple bar chart for viscosity) ---
+function drawChart(clearOnly = false) {
+  const w = chartCanvas.width;
+  const h = chartCanvas.height;
+
+  // Clear
+  ctx.clearRect(0, 0, w, h);
+
+  if (clearOnly || resultsLog.length === 0) {
+    // Title
+    ctx.fillStyle = "#000";
+    ctx.font = "bold 14px Arial";
+    ctx.fillText("Viscosity Chart", 10, 20);
+    ctx.font = "12px Arial";
+    ctx.fillText("Run simulations to populate chart.", 10, 40);
+    return;
+  }
+
+  // Title
+  ctx.fillStyle = "#000";
+  ctx.font = "bold 14px Arial";
+  ctx.fillText("Viscosity (mPa·s) by Liquid", 10, 20);
+
+  // Axis
+  const padding = 40;
+  const chartW = w - padding * 2;
+  const chartH = h - padding * 2;
+  const baseX = padding;
+  const baseY = h - padding;
+
+  ctx.strokeStyle = "#333";
+  ctx.beginPath();
+  ctx.moveTo(baseX, baseY);
+  ctx.lineTo(baseX + chartW, baseY);
+  ctx.moveTo(baseX, baseY);
+  ctx.lineTo(baseX, baseY - chartH);
+  ctx.stroke();
+
+  // Data
+  const values = resultsLog.map((r) => r.viscosity);
+  const labels = resultsLog.map((r) => r.liquid);
+  const maxVal = Math.max(...values);
+  const barW = chartW / values.length * 0.7;
+  const gap = chartW / values.length * 0.3;
+
+  // Bars
+  values.forEach((val, i) => {
+    const x = baseX + i * (barW + gap) + gap / 2;
+    const barH = (val / maxVal) * (chartH - 10);
+    const y = baseY - barH;
+
+    // Color per liquid (simple map)
+    const colorMap = {
+      water: "#4AA3FF",
+      glycerol: "#8B5CF6",
+      honey: "#F59E0B",
+      oil: "#10B981",
+      ethanol: "#EC4899",
+      milk: "#93C5FD",
+      blood: "#EF4444",
+      oliveoil: "#84CC16"
+    };
+    ctx.fillStyle = colorMap[labels[i]] || "#0078D7";
+    ctx.fillRect(x, y, barW, barH);
+
+    // Label
+    ctx.fillStyle = "#000";
+    ctx.font = "11px Arial";
+    ctx.fillText(labels[i], x, baseY + 14);
+  });
+
+  // Max value label
+  ctx.fillStyle = "#000";
+  ctx.font = "12px Arial";
+  ctx.fillText(`Max: ${maxVal.toFixed(2)} mPa·s`, baseX + chartW - 120, baseY - chartH + 16);
+}
+
+// --- Animation loop ---
+function animate() {
+  requestAnimationFrame(animate);
+  if (running && sphere.position.y > -2) {
+    sphere.position.y -= vt * 0.01; // scale down for visual
+  }
+  renderer.render(scene, camera);
+}
+animate();
+
+// --- Event listeners ---
+document.getElementById("simulateBtn").addEventListener("click", simulateLiquid);
+document.getElementById("compareBtn").addEventListener("click", showComparison);
+document.getElementById("resetBtn").addEventListener("click", resetSimulation);
+document.getElementById("clearBtn").addEventListener("click", clearLog);
+document.getElementById("exportBtn").addEventListener("click", exportLog);
+
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});</script>
+</body>
+</html>
